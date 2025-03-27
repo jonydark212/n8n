@@ -11,7 +11,7 @@ Okay, để chạy file bạn đã upload lên Github (https://github.com/jonyda
 
 2.  **Kiểm tra nội dung file:**
 
-    Chắc chắn rằng file `install_n8n.sh` mà bạn đã tạo có trong repository. Bạn có thể kiểm tra bằng lệnh:
+    Chắc chắn rằng file `n8n.sh` mà bạn đã tạo có trong repository. Bạn có thể kiểm tra bằng lệnh:
 
     ```bash
     ls -l
