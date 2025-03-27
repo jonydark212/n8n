@@ -14,16 +14,69 @@ USER_NAME=$(whoami) # Lấy username của người dùng hiện tại
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="/tmp/n8n_install_${TIMESTAMP}.log"
 
+# Danh sách các gói cần thiết
+REQUIRED_PACKAGES="curl nginx build-essential python3 git"
+
 # Hàm để hiển thị thông báo và ghi log
 log() {
   echo -e "\e[1m[$(date +'%Y-%m-%d %H:%M:%S')] $1\e[0m"
   echo "[$(date +'%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
-# Kiểm tra quyền sudo
+# Hàm kiểm tra và cài đặt gói nếu chưa có
+install_package() {
+  if ! dpkg -l | grep -q "$1"; then
+    log "Cài đặt gói $1..."
+    sudo apt install -y "$1" || {
+      log "Không thể cài đặt gói $1. Thử lại..."
+      sudo apt update
+      sudo apt install -y "$1" || {
+        log "Không thể cài đặt gói $1 sau khi cập nhật. Kiểm tra kết nối mạng."
+        return 1
+      }
+    }
+    log "Đã cài đặt gói $1 thành công."
+  else
+    log "Gói $1 đã được cài đặt."
+  fi
+  return 0
+}
+
+# Hàm kiểm tra và thêm sudo nếu cần thiết
+run_with_sudo() {
+  if command -v sudo &> /dev/null; then
+    sudo "$@"
+  else
+    "$@"
+  fi
+}
+
+# Kiểm tra và cài đặt sudo nếu cần
 if [[ $EUID -ne 0 ]]; then
-  log "Cần quyền sudo để chạy script này."
-  exit 1
+  log "Script không chạy với quyền root. Kiểm tra sudo..."
+  if ! command -v sudo &> /dev/null; then
+    log "Sudo chưa được cài đặt. Đang cài đặt sudo..."
+    apt update && apt install -y sudo || {
+      log "Không thể cài đặt sudo. Vui lòng chạy script với quyền root hoặc cài đặt sudo trước."
+      exit 1
+    }
+    log "Đã cài đặt sudo thành công."
+  fi
+  
+  # Kiểm tra xem người dùng hiện tại có trong nhóm sudo không
+  if ! groups "$USER_NAME" | grep -q sudo; then
+    log "Thêm người dùng $USER_NAME vào nhóm sudo..."
+    usermod -aG sudo "$USER_NAME" || {
+      log "Không thể thêm người dùng vào nhóm sudo. Vui lòng chạy script với quyền root."
+      exit 1
+    }
+    log "Đã thêm người dùng vào nhóm sudo. Vui lòng đăng xuất và đăng nhập lại, sau đó chạy lại script."
+    exit 0
+  fi
+  
+  log "Chạy lại script với sudo..."
+  exec sudo "$0" "$@"
+  exit $?
 fi
 
 # Kiểm tra hệ điều hành
@@ -34,32 +87,94 @@ fi
 
 # Cập nhật hệ thống
 log "Cập nhật hệ thống..."
-apt update && apt upgrade -y || {
-  log "Không thể cập nhật hệ thống. Kiểm tra kết nối mạng và thử lại."
-  exit 1
+sudo apt update || {
+  log "Không thể cập nhật danh sách gói. Thử lại sau 5 giây..."
+  sleep 5
+  sudo apt update || {
+    log "Không thể cập nhật danh sách gói. Kiểm tra kết nối mạng và thử lại."
+    exit 1
+  }
 }
+
+log "Nâng cấp các gói đã cài đặt..."
+sudo apt upgrade -y || {
+  log "Không thể nâng cấp hệ thống. Thử lại sau 5 giây..."
+  sleep 5
+  sudo apt upgrade -y || {
+    log "Cảnh báo: Không thể nâng cấp hệ thống. Tiếp tục cài đặt..."
+  }
+}
+
+# Cài đặt các gói cần thiết
+log "Kiểm tra và cài đặt các gói cần thiết..."
+for package in $REQUIRED_PACKAGES; do
+  install_package "$package" || {
+    log "Cảnh báo: Không thể cài đặt gói $package. Tiếp tục cài đặt..."
+  }
+done
 
 # Kiểm tra và cài đặt Node.js phiên bản phù hợp
 log "Kiểm tra phiên bản Node.js..."
 if ! command -v node &> /dev/null || [[ $(node -v | cut -d. -f1 | tr -d 'v') -lt 18 ]]; then
   log "Cài đặt Node.js ${NODE_VERSION}..."
-  curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash -
-  apt install -y nodejs
+  curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | sudo bash - || {
+    log "Không thể thiết lập kho lưu trữ Node.js. Thử lại..."
+    sleep 5
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | sudo bash - || {
+      log "Không thể thiết lập kho lưu trữ Node.js. Kiểm tra kết nối mạng."
+      exit 1
+    }
+  }
+  sudo apt install -y nodejs || {
+    log "Không thể cài đặt Node.js. Thử lại..."
+    sudo apt update
+    sudo apt install -y nodejs || {
+      log "Không thể cài đặt Node.js. Kiểm tra kết nối mạng."
+      exit 1
+    }
+  }
 fi
 
 # Kiểm tra phiên bản Node.js sau khi cài đặt
 NODE_CURRENT=$(node -v)
 log "Phiên bản Node.js hiện tại: ${NODE_CURRENT}"
 
-# Cài đặt các gói cần thiết
-log "Cài đặt các gói cần thiết..."
-apt install -y curl nginx npm pm2 build-essential python3
+# Cài đặt npm và pm2
+log "Kiểm tra và cài đặt npm..."
+if ! command -v npm &> /dev/null; then
+  log "Cài đặt npm..."
+  sudo apt install -y npm || {
+    log "Không thể cài đặt npm. Thử lại..."
+    sudo apt update
+    sudo apt install -y npm || {
+      log "Không thể cài đặt npm. Kiểm tra kết nối mạng."
+      exit 1
+    }
+  }
+fi
+
+log "Kiểm tra và cài đặt pm2..."
+if ! command -v pm2 &> /dev/null; then
+  log "Cài đặt pm2 toàn cục..."
+  sudo npm install -g pm2 || {
+    log "Không thể cài đặt pm2 qua npm. Thử lại..."
+    sudo npm cache clean -f
+    sudo npm install -g pm2 || {
+      log "Không thể cài đặt pm2. Kiểm tra kết nối mạng."
+      exit 1
+    }
+  }
+fi
 
 # Cài đặt N8n
 log "Cài đặt N8n..."
-npm install -g n8n || {
-  log "Không thể cài đặt N8n. Kiểm tra lại kết nối mạng và thử lại."
-  exit 1
+sudo npm install -g n8n || {
+  log "Không thể cài đặt N8n. Thử lại..."
+  sudo npm cache clean -f
+  sudo npm install -g n8n || {
+    log "Không thể cài đặt N8n. Kiểm tra lại kết nối mạng và thử lại."
+    exit 1
+  }
 }
 
 # Kiểm tra cài đặt N8n
@@ -74,13 +189,13 @@ log "Phiên bản N8n: $(n8n --version)"
 N8N_CONFIG_DIR="/home/${USER_NAME}/.n8n"
 if [ ! -d "$N8N_CONFIG_DIR" ]; then
   log "Tạo thư mục cấu hình N8n..."
-  mkdir -p "$N8N_CONFIG_DIR"
-  chown -R ${USER_NAME}:${USER_NAME} "$N8N_CONFIG_DIR"
+  sudo mkdir -p "$N8N_CONFIG_DIR"
+  sudo chown -R ${USER_NAME}:${USER_NAME} "$N8N_CONFIG_DIR"
 fi
 
 # Cấu hình N8n service bằng systemd
 log "Tạo cấu hình systemd cho N8n..."
-cat << EOF | tee /etc/systemd/system/n8n.service
+cat << EOF | sudo tee /etc/systemd/system/n8n.service
 [Unit]
 Description=N8N Workflow Automation
 After=network.target
@@ -110,11 +225,11 @@ EOF
 
 # Kích hoạt và khởi động N8n service
 log "Kích hoạt và khởi động N8n service..."
-systemctl daemon-reload
-systemctl enable n8n
-systemctl start n8n || {
+sudo systemctl daemon-reload
+sudo systemctl enable n8n
+sudo systemctl start n8n || {
   log "Không thể khởi động N8n service. Kiểm tra lỗi với: systemctl status n8n"
-  systemctl status n8n
+  sudo systemctl status n8n
   exit 1
 }
 
@@ -163,18 +278,18 @@ EOF
 
 # Kích hoạt cấu hình Nginx
 log "Kích hoạt cấu hình Nginx..."
-ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/n8n
+sudo ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/n8n
 
 # Kiểm tra cấu hình Nginx
-if ! nginx -t; then
+if ! sudo nginx -t; then
   log "Cấu hình Nginx không hợp lệ. Vui lòng kiểm tra lại."
   exit 1
 fi
 
 # Khởi động lại Nginx
-systemctl restart nginx || {
+sudo systemctl restart nginx || {
   log "Không thể khởi động lại Nginx. Kiểm tra lỗi với: systemctl status nginx"
-  systemctl status nginx
+  sudo systemctl status nginx
   exit 1
 }
 
@@ -184,9 +299,22 @@ sleep 5
 if ! curl -s --head http://localhost | grep "200 OK" > /dev/null; then
   log "Cảnh báo: Không thể kết nối đến N8n qua Nginx. Kiểm tra lại cấu hình."
   log "Bạn có thể cần kiểm tra trạng thái N8n và Nginx:"
-  log "  - systemctl status n8n"
-  log "  - systemctl status nginx"
+  log "  - sudo systemctl status n8n"
+  log "  - sudo systemctl status nginx"
   log "  - curl -v http://localhost:${N8N_PORT}"
+  
+  # Thử khởi động lại dịch vụ
+  log "Thử khởi động lại dịch vụ N8n và Nginx..."
+  sudo systemctl restart n8n
+  sudo systemctl restart nginx
+  
+  # Kiểm tra lại kết nối
+  sleep 5
+  if ! curl -s --head http://localhost | grep "200 OK" > /dev/null; then
+    log "Vẫn không thể kết nối. Vui lòng kiểm tra cấu hình thủ công."
+  else
+    log "Kết nối thành công sau khi khởi động lại dịch vụ."
+  fi
 fi
 
 log "N8n đã được cài đặt thành công!"
@@ -201,3 +329,9 @@ log "  - N8n URL: http://${IP_ADDRESS}"
 log "  - N8n Port: ${N8N_PORT}"
 log "  - Phiên bản Node.js: $(node -v)"
 log "  - Phiên bản N8n: $(n8n --version)"
+
+log "Cài đặt hoàn tất. Để quản lý dịch vụ N8n, sử dụng các lệnh:"
+log "  - Khởi động: sudo systemctl start n8n"
+log "  - Dừng: sudo systemctl stop n8n"
+log "  - Khởi động lại: sudo systemctl restart n8n"
+log "  - Kiểm tra trạng thái: sudo systemctl status n8n"
