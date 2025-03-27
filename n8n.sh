@@ -202,7 +202,7 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
   fi
 
   # Sử dụng timeout để tránh treo
-  timeout $TIMEOUT sudo npm install -g n8n || {
+  if ! timeout $TIMEOUT sudo npm install -g n8n; then
     RETRY_COUNT=$((RETRY_COUNT + 1))
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
       log "Không thể cài đặt N8n sau ${MAX_RETRIES} lần thử. Lỗi có thể do:"
@@ -214,9 +214,9 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
       exit 1
     fi
     continue
-  }
+  fi
   break
-}
+done
 
 # Kiểm tra cài đặt N8n
 if ! command -v n8n &> /dev/null; then
