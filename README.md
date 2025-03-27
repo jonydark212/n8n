@@ -22,7 +22,7 @@ Okay, để chạy file bạn đã upload lên Github (https://github.com/jonyda
 3.  **Cấp quyền thực thi cho file:**
 
     ```bash
-    chmod +x install_n8n.sh
+    chmod +x n8n.sh
     ```
 
     Lệnh này cho phép bạn chạy file `install_n8n.sh` như một chương trình.
@@ -30,7 +30,7 @@ Okay, để chạy file bạn đã upload lên Github (https://github.com/jonyda
 4.  **Chạy script cài đặt:**
 
     ```bash
-    sudo ./install_n8n.sh
+    sudo ./n8n.sh
     ```
 
     **Quan trọng:**
