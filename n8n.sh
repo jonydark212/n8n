@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Hiển thị logo PAGE1.VN
+show_logo() {
+  echo -e "\e[1;36m"
+  echo "  ____    _    ____ _____ _ __     ___   _ "
+  echo " |  _ \  / \  / ___| ____/ |  \   / / \ | |"
+  echo " | |_) |/ _ \| |  _|  _| | |   \ / / _ \| |"
+  echo " |  __/ / ___ \ |_| | |___| |    V / ___ \ |"
+  echo " |_|  /_/   \_\____|_____|_|    /_/_/   \_\_|"
+  echo -e "\e[0m"
+}
+
+# Hiển thị logo khi bắt đầu
+show_logo
+
 # Cài đặt N8n trên Ubuntu/Debian
 
 # Thoát ngay lập tức nếu một lệnh thất bại và hiển thị lỗi
@@ -166,15 +180,42 @@ if ! command -v pm2 &> /dev/null; then
   }
 fi
 
-# Cài đặt N8n
+# Kiểm tra kết nối mạng trước khi cài đặt N8n
+log "Kiểm tra kết nối mạng..."
+if ! ping -c 1 registry.npmjs.org &> /dev/null; then
+  log "Không thể kết nối đến registry.npmjs.org. Kiểm tra kết nối mạng của bạn."
+  exit 1
+fi
+
+# Cài đặt N8n với timeout và retry
 log "Cài đặt N8n..."
-sudo npm install -g n8n || {
-  log "Không thể cài đặt N8n. Thử lại..."
-  sudo npm cache clean -f
-  sudo npm install -g n8n || {
-    log "Không thể cài đặt N8n. Kiểm tra lại kết nối mạng và thử lại."
-    exit 1
+MAX_RETRIES=3
+RETRY_COUNT=0
+TIMEOUT=300  # 5 phút timeout
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+  # Xóa cache npm trước mỗi lần thử
+  if [ $RETRY_COUNT -gt 0 ]; then
+    log "Xóa cache npm và thử lại (lần thử ${RETRY_COUNT}/${MAX_RETRIES})..."
+    sudo npm cache clean -f
+    sleep 5
+  fi
+
+  # Sử dụng timeout để tránh treo
+  timeout $TIMEOUT sudo npm install -g n8n || {
+    RETRY_COUNT=$((RETRY_COUNT + 1))
+    if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+      log "Không thể cài đặt N8n sau ${MAX_RETRIES} lần thử. Lỗi có thể do:"
+      log "  - Kết nối mạng không ổn định"
+      log "  - Registry npm không phản hồi"
+      log "  - Không đủ dung lượng ổ đĩa"
+      log "  - Lỗi phân quyền"
+      log "Vui lòng kiểm tra các vấn đề trên và thử lại."
+      exit 1
+    fi
+    continue
   }
+  break
 }
 
 # Kiểm tra cài đặt N8n
